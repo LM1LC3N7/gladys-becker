@@ -32,6 +32,7 @@ permissions:
 jobs:
   quality:
     runs-on: ubuntu-latest
+    timeout-minutes: 15 # a test that hangs never holds a runner for hours
     name: Lint & test (Node ${{ matrix.node-version }})
     strategy:
       fail-fast: false
@@ -63,6 +64,7 @@ jobs:
 
   docker:
     runs-on: ubuntu-latest
+    timeout-minutes: 15 # a test that hangs never holds a runner for hours
     name: Docker build
     steps:
       - name: Checkout
