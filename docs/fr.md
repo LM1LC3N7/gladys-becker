@@ -90,11 +90,12 @@ après lui.
 ## La fermeture
 
 **Fermer** suit le même chemin (devant tout, coupe les lectures, ni retenue par
-une pause ni par la liste pas encore lue, budget de 3,3 s), mais elle n'est
-jamais renvoyée après un redémarrage. Elle n'est refusée que si son sens n'est
-pas sûr : la box liste désormais ce volet avec **un autre type**, ou son type
-est inconnu (un store banne se ferme vers le haut, un volet vers le bas), ou
-l'adresse de la box a changé sans être encore confirmée (voir plus bas).
+une pause, ni par la liste pas encore lue, ni par une nouvelle adresse pas
+encore confirmée, budget de 3,3 s), mais elle n'est jamais renvoyée après un
+redémarrage. Son sens vient du type que la box liste maintenant, sinon du type
+avec lequel l'appareil a été créé, sinon d'un volet (vers le bas). Elle n'est
+refusée que si la box liste cet identifiant comme autre chose qu'un volet (une
+porte, une lampe).
 
 ## Ouvrir et position
 
@@ -110,15 +111,18 @@ attendue jusqu'à 3,5 s) ; ou un arrêt ou une fermeture de ce volet est arrivé
 après elle.
 
 **Nouvelle adresse de box** : une autre box peut avoir des volets aux mêmes
-identifiants et types. Après un changement d'adresse, seul l'arrêt part jusqu'à
-ce que vous appuyiez sur **Tester la connexion** et que la box réponde (gardé
-au redémarrage).
+identifiants et types. Après un changement d'adresse, seuls l'arrêt et la
+fermeture partent jusqu'à ce que vous appuyiez sur **Tester la connexion** et
+que la box réponde (gardé au redémarrage).
 
 Plusieurs volets bougent en même temps (8 au plus ; une scène de cinq volets
 les règle tous les cinq). Si une commande reste sans réponse pendant que
 d'autres sont en vol, la box ne sert peut-être qu'une requête à la fois : les
 volets sont alors commandés l'un après l'autre jusqu'au redémarrage de
-l'intégration. Sur une telle box, un arrêt peut aussi attendre derrière une
+l'intégration ; dans ce mode une commande peut partir jusqu'à 3,8 s et sa
+réponse est attendue jusqu'à 4,7 s, pour qu'une scène de cinq volets à 0,9 s
+chacun les règle tous les cinq (la première scène, qui le découvre, peut voir
+les deux derniers sans réponse). Sur une telle box, un arrêt peut aussi attendre derrière une
 commande que la box est en train de servir. Une commande n'est dite **appliquée** que si une lecture après elle
 montre la position demandée (5 s et 20 s après) ; sinon le badge dit « acceptée,
 en attente de relecture », « pas encore appliquée », « envoyée, sans
@@ -134,14 +138,15 @@ listé ». Quand toutes les lectures de volets échouent, l'intégration n'est p
 affichée connectée et chaque volet dit « Non lu ». Une lecture partie avant une
 commande d'un volet ne s'applique jamais après elle, et les lectures
 s'appliquent dans l'ordre de leur départ. Un volet ou la liste des capteurs en
-échec n'arrête jamais les autres. Un redémarrage (même box) ne lit jamais plus tôt que
-l'intervalle.
+échec n'arrête jamais les autres. Un redémarrage (même box) ne lit jamais les états plus tôt que l'intervalle ;
+les listes (deux requêtes) sont lues aussitôt, si bien qu'ouvrir et position
+marchent juste après.
 
 ## Dépannage
 
 - **« pas encore relu sur la box »** : la box n'a pas encore été listée dans
-  cette session ; attendez la lecture suivante ou appuyez sur Tester la
-  connexion.
+  cette session (injoignable au démarrage) ; appuyez sur Tester la connexion :
+  dès qu'elle répond, les volets sont connus.
 - **« un autre type de volet »** : l'identifiant de cet appareil désigne
   maintenant un autre volet dans la box (reconfigurée). Supprimez l'appareil et
   ajoutez-le de nouveau depuis la Découverte.

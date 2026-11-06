@@ -150,6 +150,12 @@ export const TIMINGS = {
    */
   commandSendBy: 2500,
   commandAnswerBy: 3500,
+  /**
+   * Once the box looks serial (one request at a time), five covers at 0.9 s
+   * each must still be set: longer windows, still under the 5 s of Gladys.
+   */
+  serialSendBy: 3800,
+  serialAnswerBy: 4700,
   /** An answered command is checked by reads at these delays after its answer. */
   commandChecks: [5 * SECOND, 20 * SECOND],
   /** One read request (a list or a state). */

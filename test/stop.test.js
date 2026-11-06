@@ -63,9 +63,25 @@ test('a stop leaves for a cover the box now lists with another type', async (t) 
   const c = await s.click(1, 'state', 0);
   assert.equal(c.ack.success, true);
   assert.equal(s.box.stops(1).length, 1);
+  // Close is never blocked: the direction is the type the box lists now (a shutter: down).
   const close = await s.click(1, 'state', -1);
-  assert.equal(close.ack.success, false, 'a close is refused: its direction could be wrong');
-  assert.equal(s.box.commands((p) => p.value === 1 || p.value === -1).length, 0);
+  assert.equal(close.ack.success, true);
+  assert.deepEqual(
+    s.box.commands((p) => p.value === 1 || p.value === -1).map((r) => r.params.value),
+    [1],
+  );
+});
+
+test('a close is refused only when the box lists that id as something else than a cover', async (t) => {
+  const s = await setup({
+    devices: [cover(9, { id: 9, type: 'shutter', name: 'Garage', feedback: true })],
+  });
+  t.after(() => s.stop());
+  const close = await s.click(9, 'state', -1);
+  assert.match(close.ack.error.message, /something else than a cover/);
+  assert.equal(s.box.commands((p) => p.value === 1).length, 0);
+  await s.click(9, 'state', 0);
+  assert.equal(s.box.stops(9).length, 1, 'the stop still goes');
 });
 
 test('an unanswered stop is never given up: tries count answered sends only', async (t) => {

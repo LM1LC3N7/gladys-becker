@@ -16,6 +16,10 @@ to date at the end of every milestone.
       as a try, read back under pause, /data read again, the guards a mutant
       showed without a test (mutant list versioned in
       `scripts/mutants.list.mjs`, run by `scripts/mutants.mjs`).
+- [x] **Review r2 fixes** (2026-11-06): lists read at start and by the Test
+      button, close never blocked (refused only for a non-cover id), longer
+      windows in one-at-a-time mode, text id echo, late /data address, removed
+      cover. Suite run 20 times in a row under Node 22.
 - [ ] **Milestone 2 — real box**: run against a real CC31/CC41/CC51 (see "To
       check"); turn the answers (anonymized) into fixtures.
 - [ ] **Milestone 3 — more**: doors and windows (behind an option, never a

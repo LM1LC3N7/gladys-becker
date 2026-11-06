@@ -177,7 +177,7 @@ test('a future lastReadAt in /data is not trusted', async (t) => {
   const s = await setup({ store });
   t.after(() => s.stop());
   await s.clock.advance(61 * SECOND);
-  assert.ok(lists(s).length > 0);
+  assert.ok(s.box.reads().length > 0, 'the states read within the interval');
 });
 
 // --- I5: guards without a test ----------------------------------------------------
@@ -362,19 +362,19 @@ test('a box that seems to serve one request at a time gets one command at a time
   assert.ok(at[1] - at[0] >= 29 && at[2] - at[1] >= 29, `${at}`);
 });
 
-test('a close without a known type is refused; a stop still goes', async (t) => {
+test('a close without a known type still goes, down as a shutter', async (t) => {
   const bare = cover(7, { id: 7, type: undefined, name: 'X', feedback: false });
   bare.params = bare.params.filter((p) => p.name !== 'BECKER_TYPE');
   const s = await setup({ devices: [bare] });
   t.after(() => s.stop());
-  const close = await s.click(7, 'state', -1);
-  assert.match(close.ack.error.message, /type of cover unknown/);
-  const stop = await s.click(7, 'state', 0);
-  assert.equal(s.box.stops(7).length, 1);
-  assert.ok(stop.ack);
+  await s.click(7, 'state', -1);
+  assert.deepEqual(
+    s.box.commands((p) => p.group_id === 7).map((r) => r.params.value),
+    [1],
+  );
 });
 
-test('a new address of the box: only the stop goes until "Test the connection"', async (t) => {
+test('a new address of the box: only stop and close go until "Test the connection"', async (t) => {
   const store = memoryStore();
   const s = await setup({ store });
   t.after(() => s.stop());
@@ -382,8 +382,11 @@ test('a new address of the box: only the stop goes until "Test the connection"',
   await s.clock.advance(5 * SECOND);
   const open = await s.click(1, 'state', 1);
   assert.match(open.ack.error.message, /press Test the connection/);
+  const position = await s.click(2, 'position', 40);
+  assert.match(position.ack.error.message, /press Test the connection/);
   const close = await s.click(2, 'state', -1);
-  assert.match(close.ack.error.message, /press Test the connection/);
+  assert.equal(close.ack.success, true, 'close is never blocked');
+  assert.equal(close.pending !== undefined, true);
   assert.match(s.gladys.fake.connectionStatus.message.en, /New address/);
   assert.equal(store.data.confirm, true, 'kept across a restart');
   await s.click(1, 'state', 0);
@@ -399,7 +402,7 @@ test('a new address of the box: only the stop goes until "Test the connection"',
 
 test('every cover read failing is not "connected", and the covers say so', async (t) => {
   const s = await setup({
-    mode: (m) => (m === 'deviced.group_get_state' ? 'rpcError' : undefined),
+    mode: (m) => (m === 'deviced.group_get_state' ? { status: 404 } : undefined),
   });
   t.after(() => s.stop());
   assert.equal(s.gladys.fake.connectionStatus.connected, false);
@@ -453,4 +456,67 @@ test('a 429 on the read back of a stop pauses the reads', async (t) => {
   const before = s.box.log.length;
   await s.clock.advance(3 * MINUTE);
   assert.equal(s.box.log.length, before, 'nothing read during the pause');
+});
+
+test('a cover removed from the box (refused read) neither fails the box nor slows the reads', async (t) => {
+  const s = await setup({
+    devices: [cover(1), sensor(20)],
+    mode: (m, p) => (m === 'deviced.group_get_state' && p.group_id === 1 ? 'rpcError' : undefined),
+  });
+  t.after(() => s.stop());
+  assert.equal(s.gladys.fake.connectionStatus.connected, true);
+  assert.equal(s.badge(1).transport, 'unreachable');
+  const sensorReads = () => s.box.log.filter((r) => r.method === 'deviced.item_get_state').length;
+  const before = sensorReads();
+  await s.clock.advance(3 * MINUTE);
+  assert.equal(sensorReads() - before, 3, 'still every 60 s');
+});
+
+test('an id echoed as a text equal to ours is accepted', async (t) => {
+  const s = await setup({ start: false });
+  s.box.echo = 'text';
+  t.after(() => s.stop());
+  await s.app.boot();
+  await s.app.start(CONFIG);
+  await s.clock.advance(2000);
+  assert.equal(s.gladys.fake.connectionStatus.connected, true);
+});
+
+test('/data read late with another address: the new box must be confirmed', async (t) => {
+  let release;
+  const loading = new Promise((resolve) => (release = resolve));
+  const store = memoryStore({ address: '192.168.1.99' }, { loading });
+  const s = await setup({ store, start: false });
+  t.after(() => s.stop());
+  const boot = s.app.boot();
+  await settle();
+  await s.clock.advance(2100);
+  await boot;
+  await s.app.start(CONFIG);
+  await s.clock.advance(1000);
+  release();
+  await s.clock.advance(31 * SECOND);
+  assert.equal(s.app.storeBroken, false);
+  const open = await s.click(1, 'state', 1);
+  assert.match(open.ack.error.message, /press Test the connection/);
+});
+
+test('a serial box: once one at a time, every scene of five slow covers sets all five', async (t) => {
+  const s = await setup({
+    devices: [cover(1), cover(2), cover(3), cover(4), cover(5)],
+    latency: (m) => (m === 'deviced.group_send_command' ? 900 : 30),
+  });
+  s.box.serial = true;
+  t.after(() => s.stop());
+  const scene = async () => {
+    const clicks = [];
+    for (const id of [1, 2, 3, 4, 5]) clicks.push(await s.click(id, 'state', 1, { wait: 0 }));
+    await s.clock.advance(6000);
+    await Promise.all(clicks.map((c) => c.pending));
+    return clicks.map((c) => c.ack.success);
+  };
+  await scene(); // the first one finds out the box is serial
+  assert.equal(s.app.parallel, 1);
+  await s.clock.advance(MINUTE);
+  assert.deepEqual(await scene(), [true, true, true, true, true]);
 });

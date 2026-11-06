@@ -35,12 +35,6 @@ export default [
     'const close =',
   ],
   [
-    'a3 close refusal other type off',
-    A,
-    'if (this.otherType(id, device)) {\n      // Positively',
-    'if (false) {\n      // Positively',
-  ],
-  [
     'a4 command other type off',
     A,
     'if (this.otherType(id, device)) {\n      throw this.refuse(deviceExt, command',
@@ -197,8 +191,8 @@ export default [
   [
     'r1 id echo off',
     R,
-    'if (json.id !== id && json.id !== undefined',
-    'if (false && json.id !== undefined',
+    'echoed !== id &&\n    echoed !== String(id) &&',
+    'false &&\n    echoed !== String(id) &&',
   ],
   // Equivalent: agent: false already sends Connection: close (one request per connection).
   // ['r2 no Connection close', R, "Connection: 'close',", ''],
@@ -270,7 +264,7 @@ export default [
   ['g1 broadcast accepted', G, 'a === 0 || a >= 224', 'a === 0'],
   ['g2 mDNS name accepted', G, 'if (/\\.local\\.?$/.test(host)) {', 'if (false) {'],
   // r1 fixes.
-  ['n1 id 0 not accepted', R, '&& json.id !== 0) {', ') {'],
+  ['n1 id 0 not accepted', R, "echoed !== 0 &&\n    echoed !== '0'", "echoed !== '0'"],
   [
     'n2 check ignores the pause',
     A,
@@ -316,12 +310,6 @@ export default [
   ],
   ['n10 no serial fallback', A, 'this.parallel = 1;', ''],
   [
-    'n11 close without type allowed',
-    A,
-    'if (!type) {\n      // Without its type',
-    'if (false) {\n      // Without its type',
-  ],
-  [
     'n12 address change not confirmed',
     A,
     'if (this.lastAddressKey) {\n        this.confirmNeeded = true;',
@@ -362,7 +350,42 @@ export default [
   [
     'n20 one-cover read badge off',
     A,
-    'this.badge(device.external_id, T.badge.readFailed(err), {',
-    'void ({',
+    'outcome.coverError = err;\n          this.badge(device.external_id, T.badge.readFailed(err), {',
+    'outcome.coverError = err;\n          void ({',
+  ],
+  // r2 fixes.
+  ['p1 no lists at start', A, 'this.later(0, () => this.listSoon(generation));', ''],
+  [
+    'p2 test does not list',
+    A,
+    '// The lists, as a read does: the covers are known for this session after it.\n      await this.readLists(this.generation, undefined);',
+    "await this.rpc(this.config.address, METHODS.LIST, { item_type: 'group' }, { timeout: TIMINGS.readTimeout });",
+  ],
+  ['p3 serial windows short', C, 'serialSendBy: 3800,', 'serialSendBy: 2500,'],
+  ['p4 serial not detected', A, 'crowded = this.active > 1;', ''],
+  ['p5 close to a non-cover', A, 'if (this.notCovers.has(id)) {', 'if (false) {'],
+  [
+    'p6 close ignores the created type',
+    A,
+    "?? paramOf(device, PARAMS.TYPE) ?? 'shutter';",
+    "?? 'shutter';",
+  ],
+  [
+    'p7 text id refused',
+    R,
+    'echoed !== String(id) &&\n    echoed !== undefined',
+    'echoed !== undefined',
+  ],
+  [
+    'p8 late /data address ignored',
+    A,
+    '// /data read late: the box changed since it was written.\n        this.confirmNeeded = true;',
+    '',
+  ],
+  [
+    'p9 refused read is a failure',
+    A,
+    "if (err?.kind === 'rpc') {\n          // The box answered and refuses this item",
+    'if (false) {\n          // The box answered and refuses this item',
   ],
 ];

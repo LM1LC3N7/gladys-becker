@@ -81,11 +81,11 @@ clicked before a stop leaves after it.
 ## The close
 
 **Close** follows the same path (ahead of everything, cuts the reads, not held
-by a pause nor by the list not yet read, 3.3 s budget), but it is never sent
-again after a restart. It is refused only when its direction is not sure: the
-box now lists that cover with **another type**, or its type is unknown (an
-awning closes up, a shutter down), or the address of the box changed and was
-not confirmed yet (see below).
+by a pause, by the list not yet read, by a new address not confirmed yet, 3.3 s
+budget), but it is never sent again after a restart. Its direction comes from
+the type the box lists now, else the type the device was created with, else a
+shutter (down). It is refused only when the box lists that id as something
+else than a cover (a door, a light).
 
 ## Open and position
 
@@ -99,14 +99,16 @@ to 100; 32 commands already wait; the command cannot leave within 2.5 s (its
 answer is awaited until 3.5 s); or a stop or close of that cover came after it.
 
 **A new address of the box**: another box may hold covers with the same ids and
-types. After the address changes, only the stop goes until you press **Test the
-connection** and the box answers (kept across a restart).
+types. After the address changes, only stop and close go until you press **Test
+the connection** and the box answers (kept across a restart).
 
 Several covers move at once (up to 8; a scene of five covers sets all five).
 If a command gets no answer while others are in flight, the box may serve one
 request at a time: the covers are then commanded one after the other until the
-integration restarts. On such a box a stop may also wait behind a command the
-box is serving. A command is
+integration restarts; in that mode a command may leave until 3.8 s and is
+answered until 4.7 s, so that a scene of five covers at 0.9 s each still sets
+all five (the first scene, which finds out, may see the last two unanswered).
+On such a box a stop may also wait behind a command the box is serving. A command is
 said **applied** only when a read after it shows the asked position (5 s and
 20 s after); otherwise the badge says "accepted, waiting for the read back",
 "not applied yet", "sent, without confirmation" (no answer) or "nothing sent".
@@ -120,13 +122,14 @@ next read; missing twice, it is shown "no longer listed". When every cover read
 fails, the integration is not shown connected and each cover says "Not read". A
 read that left before a command
 of a cover is never applied after it, and reads apply in the order they left. A
-cover or the sensor list that fails never stops the others. A restart (same box) never
-reads sooner than the interval.
+cover or the sensor list that fails never stops the others. A restart (same box) never reads the states sooner than the interval; the lists
+(two requests) are read at once, so open and position work right after it.
 
 ## Troubleshooting
 
 - **"not yet read back from the box"**: the box was not listed yet in this
-  session; wait for the next read or press Test the connection.
+  session (unreachable at start); press Test the connection: once it answers,
+  the covers are known.
 - **"another type of cover"**: the id of that device now holds another cover in
   the box (reconfigured). Delete the device and add it again from Discovery.
 - **"/data not read yet"**: the file `/data/becker-state.json` could not be

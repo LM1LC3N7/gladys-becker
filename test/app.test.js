@@ -270,9 +270,45 @@ test('a restart never reads sooner than the interval', async (t) => {
   const store = s.store;
   const again = await setup({ store, clock: s.clock });
   t.after(() => again.stop());
-  assert.equal(again.box.log.length, 0);
+  // The lists only (two requests) at once; no state before the interval.
+  const states = () => again.box.log.filter((r) => r.method !== 'deviced.deviced_get_item_list');
+  assert.equal(states().length, 0);
+  assert.equal(again.box.log.length, 2);
   await again.clock.advance(50 * SECOND);
-  assert.ok(again.box.log.length > 0);
+  assert.ok(states().length > 0);
+});
+
+test('after a restart within the interval, open works at once (the lists are read at start)', async (t) => {
+  const s = await setup({ config: { ...CONFIG, poll_interval: 3600 } });
+  await s.stop();
+  const again = await setup({
+    store: s.store,
+    clock: s.clock,
+    config: { ...CONFIG, poll_interval: 3600 },
+  });
+  t.after(() => again.stop());
+  const open = await again.click(1, 'state', 1);
+  assert.equal(open.ack.success, true);
+  assert.equal(again.box.reads().length, 0, 'no state read before the interval');
+});
+
+test('"Test the connection" lists the covers: open works after it', async (t) => {
+  let down = true;
+  const s = await setup({
+    config: { ...CONFIG, poll_interval: 3600 },
+    mode: () => (down ? 'refuse' : undefined),
+  });
+  t.after(() => s.stop());
+  const refused = await s.click(1, 'state', 1);
+  assert.match(refused.ack.error.message, /not yet read back/);
+  down = false;
+  await s.clock.advance(20 * SECOND);
+  const test = s.app.testConnection();
+  await settle();
+  await s.clock.advance(500);
+  await test;
+  const open = await s.click(1, 'state', 1);
+  assert.equal(open.ack.success, true);
 });
 
 test('getConfig failing in connected is tried again every 30 s, then starts', async (t) => {

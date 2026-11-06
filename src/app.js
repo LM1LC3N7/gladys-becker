@@ -56,6 +56,7 @@ import {
   parseExternalId,
   parseGroupState,
   parseGroups,
+  parseOtherGroupIds,
   parseRemoteState,
   parseRemotes,
   positionOf,
@@ -119,6 +120,8 @@ export class BeckerApp {
     /** Session (reset at every start and when the box stops answering). */
     this.groups = new Map();
     this.missingOnce = new Set();
+    /** item ids the box lists as groups that are not covers (doors, lights...) */
+    this.notCovers = new Set();
     this.remotes = new Map();
     this.listed = false;
     this.listedAt = -Infinity;
@@ -308,8 +311,13 @@ export class BeckerApp {
     if (paused !== undefined && paused > wall) {
       this.pauseUntil = mono + Math.min(paused - wall, TIMINGS.pauseMax);
     }
-    if (typeof data.address === 'string' && addressOf(data.address) && !this.lastAddressKey) {
-      this.lastAddressKey = data.address;
+    if (typeof data.address === 'string' && addressOf(data.address)) {
+      if (!this.lastAddressKey) {
+        this.lastAddressKey = data.address;
+      } else if (this.lastAddressKey !== data.address) {
+        // /data read late: the box changed since it was written.
+        this.confirmNeeded = true;
+      }
     }
     if (data.confirm === true) {
       this.confirmNeeded = true;
@@ -489,11 +497,16 @@ export class BeckerApp {
       return;
     }
     await this.publishDiscovery();
-    // Never sooner than the interval after the last read (restart, same box).
+    // Never sooner than the interval after the last read (restart, same box);
+    // the lists (two small requests, no state) are read at once, so open and
+    // position are not refused for up to an interval after a restart.
     const wait = readSoon
       ? 0
       : Math.max(0, this.lastReadMono + this.config.pollInterval * 1000 - this.monotonic());
     this.scheduleCycle(generation, wait);
+    if (wait > 0) {
+      this.later(0, () => this.listSoon(generation));
+    }
   }
 
   current(generation) {
@@ -803,6 +816,29 @@ export class BeckerApp {
     this.scheduleCycle(generation, next);
   }
 
+  /** The lists alone, out of the interval (start within the interval). */
+  async listSoon(generation) {
+    if (!this.current(generation) || !this.running || this.reading || this.listed) {
+      return;
+    }
+    if (this.pauseLeft() > 0) {
+      return;
+    }
+    this.reading = true;
+    const ctl = new AbortController();
+    this.cycleCtl = ctl;
+    try {
+      await this.readLists(generation, ctl.signal);
+    } catch (err) {
+      this.logger.warn(`CentralControl lists not read: ${err?.message}`);
+      if (err?.kind === 'rate' || err?.kind === 'server') this.pauseFor(err);
+    } finally {
+      if (this.cycleCtl === ctl) this.cycleCtl = undefined;
+      this.reading = false;
+    }
+    if (this.current(generation)) await this.updateStatus();
+  }
+
   /** Cuts the periodic read in flight (a stop or a close); it does not count as a failure. */
   cutCycleRead() {
     this.cycleCtl?.abort('protective');
@@ -817,6 +853,7 @@ export class BeckerApp {
       { timeout: TIMINGS.readTimeout, maxBytes: LIMITS.listBytes, signal },
     );
     const groups = parseGroups(groupsResult);
+    const notCovers = parseOtherGroupIds(groupsResult);
     if (!groups) {
       throw new BeckerError('format', 'not a list of the box', { sent: true, answered: true });
     }
@@ -857,6 +894,7 @@ export class BeckerApp {
       }
     }
     this.groups = next;
+    this.notCovers = notCovers;
     if (remotes) {
       this.remotes = new Map(remotes.map((r) => [r.id, r]));
       this.remotesListed = true;
@@ -917,6 +955,15 @@ export class BeckerApp {
         }
         if (err?.kind === 'rate' || err?.kind === 'server') {
           throw err; // the box asked to slow down: the whole cycle stops
+        }
+        if (err?.kind === 'rpc') {
+          // The box answered and refuses this item (removed from it): not a
+          // failure of the box, the others and the pace are untouched.
+          this.badge(device.external_id, T.badge.readFailed(err), {
+            degraded: true,
+            transport: 'unreachable',
+          });
+          continue;
         }
         // One cover that fails never stops the others.
         outcome.failed += 1;
@@ -1045,23 +1092,16 @@ export class BeckerApp {
     }
     this.lastTestMono = mono;
     try {
-      const result = await this.rpc(
-        this.config.address,
-        METHODS.LIST,
-        { item_type: 'group' },
-        { timeout: TIMINGS.readTimeout, maxBytes: LIMITS.listBytes },
-      );
-      const groups = parseGroups(result);
-      if (!groups) {
-        throw new BeckerError('format', 'not a list', { sent: true, answered: true });
-      }
+      // The lists, as a read does: the covers are known for this session after it.
+      await this.readLists(this.generation, undefined);
       if (this.confirmNeeded) {
         // The user saw this box answer at the new address: its covers are confirmed.
         this.confirmNeeded = false;
         this.persist();
         this.updateStatus().catch(() => {});
       }
-      return T.test.ok({ covers: groups.length, sensors: this.remotes.size });
+      await this.updateStatus();
+      return T.test.ok({ covers: this.groups.size, sensors: this.remotes.size });
     } catch (err) {
       if (err?.kind === 'rate' || err?.kind === 'server') this.pauseFor(err);
       return T.test.failed(err);
@@ -1310,18 +1350,14 @@ export class BeckerApp {
 
   async closeClicked(id, device) {
     const deviceExt = groupIds(this.gladys, id).device;
-    if (this.otherType(id, device)) {
-      // Positively another cover now: its direction could be the other way.
-      throw this.refuse(deviceExt, 'close', '', T.why.otherType);
+    if (this.notCovers.has(id)) {
+      // The box lists this id as something else than a cover (a door, a light):
+      // the only refusal of a close.
+      throw this.refuse(deviceExt, 'close', '', T.why.notCover);
     }
-    const type = this.groups.get(id)?.type ?? paramOf(device, PARAMS.TYPE);
-    if (!type) {
-      // Without its type, the direction of "close" is unknown (an awning closes up).
-      throw this.refuse(deviceExt, 'close', '', T.why.noType);
-    }
-    if (this.confirmNeeded) {
-      throw this.refuse(deviceExt, 'close', '', T.why.confirm);
-    }
+    // The direction: the type the box lists now, else the one the device was
+    // created with, else a shutter (down).
+    const type = this.groups.get(id)?.type ?? paramOf(device, PARAMS.TYPE) ?? 'shutter';
     const seq = ++this.seq;
     this.barrierFor(id, seq);
     this.cutCycleRead();
@@ -1519,7 +1555,10 @@ export class BeckerApp {
 
   /** @returns {Promise<{ answered: boolean, sent: boolean, error?: BeckerError, sendSeq?: number }>} */
   async sendCommand({ id, seq, arrival, address, generation, params }) {
-    const sendBy = arrival + TIMINGS.commandSendBy;
+    // One at a time (a serial box), a scene of five covers needs longer windows.
+    const serial = this.parallel === 1;
+    const sendBy = arrival + (serial ? TIMINGS.serialSendBy : TIMINGS.commandSendBy);
+    const answerBy = arrival + (serial ? TIMINGS.serialAnswerBy : TIMINGS.commandAnswerBy);
     const check = () => {
       if (this.closed || generation !== this.generation) throw notSent('stopping');
       if ((this.barrier.get(id) ?? 0) > seq) throw notSent('stopped');
@@ -1537,13 +1576,16 @@ export class BeckerApp {
     }
     const marker = { kind: 'command' };
     let sendSeq;
+    let crowded = false;
     try {
       await this.rpc(address, METHODS.COMMAND, params, {
-        timeout: Math.max(1, arrival + TIMINGS.commandAnswerBy - this.monotonic()),
+        timeout: Math.max(1, answerBy - this.monotonic()),
         beforeSend: () => {
           check();
           sendSeq = ++this.seq;
           this.commandSeq.set(id, sendSeq);
+          // Other commands in flight when this one leaves (serial box detection).
+          crowded = this.active > 1;
           const stop = this.stops.get(id);
           if (stop) stop.suspendedBy = marker;
         },
@@ -1564,7 +1606,7 @@ export class BeckerApp {
       if (err.kind === 'rate' || err.kind === 'server') {
         this.pauseFor(err);
       }
-      if (err.kind === 'timeout' && err.sent && this.active > 1 && this.parallel > 1) {
+      if (err.kind === 'timeout' && err.sent && crowded && this.parallel > 1) {
         // A box that may serve one request at a time (unknown, see TODO.md):
         // its covers are commanded one after the other for the rest of the run.
         this.parallel = 1;

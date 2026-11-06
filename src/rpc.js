@@ -227,7 +227,16 @@ export function parseAnswer({ status, headers = {}, body }, id) {
   // checked when the box echoes one (the reference always sends 0 and never
   // reads it back): absent, null or 0 is taken as "not echoed"; another
   // number is the answer to another request.
-  if (json.id !== id && json.id !== undefined && json.id !== null && json.id !== 0) {
+  // An id echoed as a text ("5") is ours when it reads as ours.
+  const echoed = typeof json.id === 'string' ? json.id.trim() : json.id;
+  if (
+    echoed !== id &&
+    echoed !== String(id) &&
+    echoed !== undefined &&
+    echoed !== null &&
+    echoed !== 0 &&
+    echoed !== '0'
+  ) {
     throw new BeckerError('format', 'answer to another request', answered);
   }
   if (Object.hasOwn(json, 'error') && json.error !== null) {

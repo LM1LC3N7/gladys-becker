@@ -86,6 +86,23 @@ export function parseGroups(result) {
   return [...seen.values()];
 }
 
+/** The ids the box lists as groups that are not covers (doors, lights, heaters...). */
+export function parseOtherGroupIds(result) {
+  const ids = new Set();
+  const list = Array.isArray(result?.item_list) ? result.item_list : [];
+  for (const item of list.slice(0, LIMITS.items * 2)) {
+    const id = itemId(item?.id);
+    if (
+      id !== undefined &&
+      typeof item?.device_type === 'string' &&
+      !COVER_TYPES.has(item.device_type)
+    ) {
+      ids.add(id);
+    }
+  }
+  return ids;
+}
+
 /**
  * The sensors of a list answer (item_type "remote"), bounded; undefined when
  * the answer is not a list.

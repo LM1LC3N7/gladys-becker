@@ -176,8 +176,8 @@ export const T = {
     fr: '/data pas encore lu (relu toutes les 30 s) : les arrêts ne sont pas gardés au redémarrage d’ici là',
   },
   confirmNeeded: {
-    en: 'New address: press Test the connection to confirm the box (only the stop goes until then)',
-    fr: 'Nouvelle adresse : appuyez sur Tester la connexion pour confirmer la box (seul l’arrêt part d’ici là)',
+    en: 'New address: press Test the connection to confirm the box (only stop and close go until then)',
+    fr: 'Nouvelle adresse : appuyez sur Tester la connexion pour confirmer la box (seuls l’arrêt et la fermeture partent d’ici là)',
   },
   test: {
     ok: ({ covers, sensors }) => ({
@@ -314,9 +314,9 @@ export const T = {
       fr: `la box a demandé de ralentir, encore ${age(ms)}`,
     }),
     value: { en: 'invalid value', fr: 'valeur invalide' },
-    noType: {
-      en: 'type of cover unknown until the box lists it',
-      fr: 'type de volet inconnu tant que la box ne l’a pas listé',
+    notCover: {
+      en: 'the box lists this id as something else than a cover',
+      fr: 'la box liste cet identifiant comme autre chose qu’un volet',
     },
     confirm: {
       en: 'new address of the box: press Test the connection to confirm it',

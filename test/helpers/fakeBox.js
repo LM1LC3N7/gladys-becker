@@ -103,6 +103,7 @@ export function createBox({ clock, latency = 30, mode } = {}) {
   const echoed = (id, out) => {
     if (box.echo === undefined) return { jsonrpc: '2.0', id, ...out };
     if (box.echo === 'absent') return { jsonrpc: '2.0', ...out };
+    if (box.echo === 'text') return { jsonrpc: '2.0', id: String(id), ...out };
     return { jsonrpc: '2.0', id: box.echo, ...out };
   };
 
@@ -188,6 +189,13 @@ export function createBox({ clock, latency = 30, mode } = {}) {
           };
         };
         const reply = () => finish(resolve, answer());
+        // `serial`: the box serves one request at a time, in arrival order.
+        if (box.serial && !(how && typeof how.then === 'function')) {
+          const start = Math.max(clock.elapsed, box.busyUntil ?? 0);
+          box.busyUntil = start + ms;
+          answerTimer = timers.setTimeout(reply, box.busyUntil - clock.elapsed);
+          return;
+        }
         if (how && typeof how.then === 'function') {
           how.then(reply);
         } else {

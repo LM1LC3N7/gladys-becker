@@ -36,3 +36,13 @@ the notes of the version's GitHub Release.
   a time; a close without a known type is refused; a new address of the box must
   be confirmed by "Test the connection"; all covers failing is not
   "connected"; a cover missing from one list is kept until the next.
+- After a restart, the lists of the box are read at once (open and position no
+  longer refused for up to an interval); "Test the connection" lists the covers.
+- Close is never blocked: it goes after an address change or without a known
+  type (direction of a shutter), refused only for an id the box lists as
+  something else than a cover.
+- One-at-a-time mode: commands leave until 3.8 s and are answered until 4.7 s,
+  so a scene of five slow covers sets all five.
+- An id echoed as a text equal to ours is accepted; an address change is seen
+  even when /data is read late; a cover the box refuses to read (removed) does
+  not make the box unreachable nor slow the other reads.
