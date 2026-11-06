@@ -99,6 +99,13 @@ export function createBox({ clock, latency = 30, mode } = {}) {
     return { error: { code: -32601, message: 'method not found' } };
   };
 
+  /** `box.echo`: undefined echoes the id; 'absent', null or 0 answer without it. */
+  const echoed = (id, out) => {
+    if (box.echo === undefined) return { jsonrpc: '2.0', id, ...out };
+    if (box.echo === 'absent') return { jsonrpc: '2.0', ...out };
+    return { jsonrpc: '2.0', id: box.echo, ...out };
+  };
+
   box.post = (address, body, { timeout, signal, beforeSend, timers }) =>
     new Promise((resolve, reject) => {
       const json = JSON.parse(String(body).replace(/\u0000$/, ''));
@@ -177,7 +184,7 @@ export function createBox({ clock, latency = 30, mode } = {}) {
           return {
             status: 200,
             headers: {},
-            body: `${JSON.stringify({ jsonrpc: '2.0', id, ...out })}\u0000`,
+            body: `${JSON.stringify(echoed(id, out))}\u0000`,
           };
         };
         const reply = () => finish(resolve, answer());

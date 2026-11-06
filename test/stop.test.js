@@ -79,9 +79,13 @@ test('an unanswered stop is never given up: tries count answered sends only', as
   const c = await s.click(1, 'state', 0);
   assert.equal(c.ack.success, false, 'never "applied" without an answer');
   const inBudget = s.box.stops(1).length;
-  await s.clock.advance(40 * SECOND);
-  assert.ok(s.box.stops(1).length >= inBudget + 3, 'sent again at 5, 10 and 20 s');
-  assert.ok(s.box.stops(1).length >= 2, 'written again within its budget');
+  // One round per budget (the send waits until its end), then 5, 10, 20 s apart.
+  assert.equal(inBudget, 1);
+  await s.clock.advance(45 * SECOND);
+  const at = s.box.stops(1).map((r) => r.at);
+  assert.equal(at.length, 4, `${at}`);
+  const gaps = at.slice(1).map((v, i) => Math.round((v - at[i]) / 100) / 10);
+  assert.deepEqual(gaps, [8.3, 13.3, 23.3], 'budget 3.3 s, then 5, 10, 20 s');
   assert.equal(store.data.stops.length, 1);
   assert.equal(store.data.stops[0].tries, 0);
   assert.equal(store.data.stops[0].address, ADDRESS);
@@ -219,6 +223,8 @@ test('a newer open accepted by the box replaces the stop; one without answer doe
   t.after(() => s.stop());
   await s.click(1, 'state', 0);
   assert.equal(s.app.stops.size, 1);
+  // Its next retry is 20 s away when the open fails.
+  await s.clock.advance(22 * SECOND);
   // Open without answer: in doubt the stop still goes, at once.
   dropStop = false;
   const before = s.box.stops(1).length;
@@ -303,7 +309,7 @@ test('/data unreadable: never overwritten, stops still go', async (t) => {
   await s.click(1, 'state', 0);
   assert.equal(store.saves, 0);
   assert.equal(s.box.stops(1).length, 1);
-  assert.match(s.gladys.fake.connectionStatus.message.en, /\/data unreadable/);
+  assert.match(s.gladys.fake.connectionStatus.message.en, /\/data not read yet/);
 });
 
 test('the check of a stop is armed before /data is written, and a slow /data holds nothing', async (t) => {

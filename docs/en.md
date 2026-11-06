@@ -45,16 +45,23 @@ Becker cloud nor its relay.
 The **stop** is never blocked: not by a read in progress (it cuts it), not by a
 pause asked by the box, not by another command waiting, not by the list of the
 box not yet read, not by a configuration that cannot be read (it goes to the
-last address known), not by `/data` being slow or unreadable. It leaves at once;
-within 3.3 s it is written again every 250 ms until the box answers.
+last address known), not by `/data` being slow or unreadable. It leaves at once
+and waits up to 3.3 s for the answer (a slow answer is an answer); when the
+connection itself fails, it is written again every 250 ms within those 3.3 s.
+**Any answer of the box counts** (an acceptance, a refusal, an error page);
+a 429 or 5xx, a timeout or a cut connection does not.
 
 The stop is kept (in memory, and in `/data` without waiting for it) until a read
 of the cover, started after the box answered, shows it no longer moves:
 
 - a stop the box has not answered is sent again after 5 s, 10 s, 20 s, 30 s,
   then every minute and at each successful read, **without end and without age
-  limit**: only an answered send counts as a try (a timeout, a cut connection,
-  a 429 or a 5xx does not);
+  limit**: only an answered send counts as a try;
+- a stop the box answered without accepting it (a refusal, an error page) is
+  acked as failed, and the read back decides as for an accepted one;
+- the read back waits for the end of a pause the box asked (429, 5xx); when it
+  gets no answer it is tried again after 5 s, 10 s, 20 s... up to every minute;
+  when the box refuses to give that state (a group removed), the stop ends;
 - answered but the cover still moves the same way: sent again, **3 answered
   tries at most**, then shown "still moving" on the badge;
 - the cover moves **the other way**: a move started elsewhere (app, remote) is
@@ -74,10 +81,11 @@ clicked before a stop leaves after it.
 ## The close
 
 **Close** follows the same path (ahead of everything, cuts the reads, not held
-by a pause nor by the list not yet read, written again every 250 ms within
-3.3 s), but it is never sent again after a restart. It is refused only when the
-box now lists that cover with **another type** (its direction could be the
-other way: an awning closes up, a shutter down).
+by a pause nor by the list not yet read, 3.3 s budget), but it is never sent
+again after a restart. It is refused only when its direction is not sure: the
+box now lists that cover with **another type**, or its type is unknown (an
+awning closes up, a shutter down), or the address of the box changed and was
+not confirmed yet (see below).
 
 ## Open and position
 
@@ -85,11 +93,20 @@ They are refused, with the reason on the device's badge, when: the
 configuration is not valid; the box asked to slow down (429, 5xx; the pause is
 kept across a restart, 1 min to 6 h); the cover has not been listed by the box
 since the start (or since it stopped answering); the box lists that id with
-another type; the motor gives no position (position only); the value is not a
-whole number from 0 to 100; 32 commands already wait; the command cannot leave
-within 3.5 s; or a stop or close of that cover came after it.
+another type; the address of the box changed and was not confirmed yet; the
+motor gives no position (position only); the value is not a whole number from 0
+to 100; 32 commands already wait; the command cannot leave within 2.5 s (its
+answer is awaited until 3.5 s); or a stop or close of that cover came after it.
 
-Several covers move at once (a scene of five covers sets all five). A command is
+**A new address of the box**: another box may hold covers with the same ids and
+types. After the address changes, only the stop goes until you press **Test the
+connection** and the box answers (kept across a restart).
+
+Several covers move at once (up to 8; a scene of five covers sets all five).
+If a command gets no answer while others are in flight, the box may serve one
+request at a time: the covers are then commanded one after the other until the
+integration restarts. On such a box a stop may also wait behind a command the
+box is serving. A command is
 said **applied** only when a read after it shows the asked position (5 s and
 20 s after); otherwise the badge says "accepted, waiting for the read back",
 "not applied yet", "sent, without confirmation" (no answer) or "nothing sent".
@@ -97,7 +114,11 @@ said **applied** only when a read after it shows the asked position (5 s and
 ## Reads
 
 The positions and sensors are read at the interval you set, one request at a
-time; the lists of the box every 10 minutes. A read that left before a command
+time; the lists of the box every 10 minutes. A cover missing from one list
+(the box may list part of its items) is kept until the next list, read at the
+next read; missing twice, it is shown "no longer listed". When every cover read
+fails, the integration is not shown connected and each cover says "Not read". A
+read that left before a command
 of a cover is never applied after it, and reads apply in the order they left. A
 cover or the sensor list that fails never stops the others. A restart (same box) never
 reads sooner than the interval.
@@ -108,6 +129,8 @@ reads sooner than the interval.
   session; wait for the next read or press Test the connection.
 - **"another type of cover"**: the id of that device now holds another cover in
   the box (reconfigured). Delete the device and add it again from Discovery.
-- **"/data unreadable"**: the file `/data/becker-state.json` cannot be read; it
-  is left as it is and the stops are not kept across a restart.
+- **"/data not read yet"**: the file `/data/becker-state.json` could not be
+  read (or took more than 2 s); it is left as it is, read again every 30 s, and
+  the stops it keeps are sent as soon as it is read. Nothing is written to it
+  meanwhile, so the stops are not kept across a restart until then.
 - The logs never hold an address you typed by mistake.

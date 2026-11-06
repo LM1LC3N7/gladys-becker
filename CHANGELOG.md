@@ -21,3 +21,18 @@ the notes of the version's GitHub Release.
   try, 3 at most), and sent at start from `/data` before Gladys is reached.
 - Badges saying where each command stands; "Test the connection" button.
 - Documentation in English and French.
+
+### Fixed
+
+- A box that does not echo the JSON-RPC id (absent, null, 0) is accepted.
+- Any answer of the box to a stop counts as a try (a refusal, an error page, a
+  slow answer up to 3.3 s): no more endless bursts of stops.
+- The read back of a stop waits for a pause the box asked, backs off, and ends
+  when the box refuses that state.
+- `/data` slower than 2 s at start is read again every 30 s; its stops are sent
+  then, and nothing is written before it is read.
+- 300 states a minute even with publications at the same time; a stop the box
+  did not accept is acked as failed; a box that seems serial gets one command at
+  a time; a close without a known type is refused; a new address of the box must
+  be confirmed by "Test the connection"; all covers failing is not
+  "connected"; a cover missing from one list is kept until the next.

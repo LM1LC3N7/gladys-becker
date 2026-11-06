@@ -64,19 +64,28 @@ test('a call is the JSON-RPC of the reference, ended by a NUL byte, without the 
   assert.equal(r.headers['content-type'], 'text/plain');
   assert.equal(r.headers.host, `127.0.0.1:${srv.address.port}`);
   assert.equal(r.headers.origin, undefined);
+  assert.equal(r.headers.connection, 'close', 'one request per connection');
   assert.equal(r.headers.cookie, undefined);
   assert.doesNotMatch(JSON.stringify(r.headers), /b-tronic/);
 });
 
-test('only the answer to its own request is accepted', async (t) => {
-  const srv = await server(
-    (entry, res) => res.end(JSON.stringify({ jsonrpc: '2.0', id: 0, result: {} })),
-    t,
-  );
-  await assert.rejects(
-    call(srv.address, 'm', {}, { timeout: 1000 }),
-    (e) => e.kind === 'format' && e.answered,
-  );
+test('an echoed id must be ours; an id not echoed (absent, null, 0) is accepted', async (t) => {
+  let id;
+  const srv = await server((entry, res) => {
+    const body = { jsonrpc: '2.0', result: { ok: 1 } };
+    if (id !== 'absent') body.id = id === 'mine' ? JSON.parse(entry.body.slice(0, -1)).id : id;
+    res.end(JSON.stringify(body));
+  }, t);
+  for (id of ['absent', null, 0, 'mine']) {
+    assert.deepEqual(await call(srv.address, 'm', {}, { timeout: 1000 }), { ok: 1 }, String(id));
+  }
+  for (id of [7, 'x']) {
+    await assert.rejects(
+      call(srv.address, 'm', {}, { timeout: 1000 }),
+      (e) => e.kind === 'format' && e.answered,
+      String(id),
+    );
+  }
 });
 
 test('an error of the box is an answered refusal with its code', async (t) => {

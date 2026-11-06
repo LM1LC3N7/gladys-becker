@@ -99,3 +99,33 @@ test('a read of /data that never ends is given up after its bound', async () => 
   assert.deepEqual(outcome, { broken: true });
   assert.ok(performance.now() - started < 1000);
 });
+
+test('a write of /data that never ends is given up after its bound', async () => {
+  const store = fileStore({
+    path: '/nonexistent/x',
+    timeout: 200,
+    write: () => new Promise(() => {}),
+  });
+  let bound;
+  const outcome = await Promise.race([
+    store.save({ a: 1 }).then(
+      () => 'saved',
+      () => 'given up',
+    ),
+    new Promise((resolve) => {
+      bound = setTimeout(() => resolve('still waiting'), 1000);
+    }),
+  ]);
+  clearTimeout(bound);
+  assert.equal(outcome, 'given up');
+});
+
+test('a link planted as the temporary file is never written through', async (t) => {
+  const base = await dir(t);
+  const outside = join(base, 'outside.txt');
+  await writeFile(outside, 'untouched');
+  const path = join(base, 'state.json');
+  await symlink(outside, `${path}.tmp`);
+  await assert.rejects(fileStore({ path }).save({ a: 1 }));
+  assert.equal(await readFile(outside, 'utf8'), 'untouched');
+});

@@ -11,10 +11,13 @@
 // at once on its own connection (to the address of the configuration, else the
 // last one known from /data), whatever the pause, the identity check, the
 // queue or the configuration; it drops the commands of that cover not yet
-// sent. Within 3.3 s it is written again every 250 ms until the box answers;
-// then it is kept (in memory and, without waiting, in /data) and sent again
+// sent. One send waits for its answer until the end of its 3.3 s budget (a
+// slow answer is an answer); a connection that fails is written again every
+// 250 ms within it. Any answer of the box counts (a refusal, a 404, a page
+// that is not JSON-RPC), never a 429/5xx, a timeout or a cut. Not answered,
+// the stop is kept (in memory and, without waiting, in /data) and sent again
 // (5 s, 10 s, 20 s, 30 s, then every minute, and at every successful read)
-// until the box answers: only an answered send counts as a try. An answered
+// until the box answers. An answered
 // stop is checked by a read started after the answer: not moving -> applied;
 // still moving the same way -> sent again (3 answered tries at most); moving
 // the other way -> a move started elsewhere, left alone. A newer command of
@@ -28,7 +31,7 @@
 //
 // Open and position: only for a cover listed by the box in this session with
 // the type it had when created; serialized per cover, several covers at once
-// (a scene); refused when they cannot leave within 3.5 s or when a stop or a
+// (a scene); refused when they cannot leave within 2.5 s or when a stop or a
 // close came after them; paused by a 429 or a 5xx.
 //
 // Reads: a read whose request left before a command of that cover never
@@ -115,6 +118,7 @@ export class BeckerApp {
 
     /** Session (reset at every start and when the box stops answering). */
     this.groups = new Map();
+    this.missingOnce = new Set();
     this.remotes = new Map();
     this.listed = false;
     this.listedAt = -Infinity;
@@ -139,6 +143,8 @@ export class BeckerApp {
     this.chains = new Map();
     this.queued = 0;
     this.active = 0;
+    /** Commands of different covers in flight at once (1 once the box looks serial). */
+    this.parallel = LIMITS.parallelCommands;
     this.slotWaiters = [];
 
     this.cycleTimer = undefined;
@@ -233,25 +239,51 @@ export class BeckerApp {
   }
 
   async bootNow() {
-    let loaded;
+    const loaded = await this.loadStore();
+    this.applyLoad(loaded);
+  }
+
+  /** store.load(), bounded here too (a store that never answers is "broken" for now). */
+  async loadStore() {
+    let bound;
     try {
-      loaded = await this.store.load();
+      return await Promise.race([
+        Promise.resolve().then(() => this.store.load()),
+        new Promise((resolve) => {
+          bound = this.timers.setTimeout(() => resolve({ broken: true }), TIMINGS.storeTimeout);
+        }),
+      ]);
     } catch {
-      loaded = { broken: true };
+      return { broken: true };
+    } finally {
+      this.timers.clearTimeout(bound);
     }
-    if (this.closed) {
+  }
+
+  applyLoad(loaded) {
+    if (this.closed || this.loaded) {
       return;
     }
     if (loaded?.broken) {
-      // Unreadable is not empty: never overwritten (it may hold stops).
+      // Unreadable (or too slow) is not empty: never overwritten (it may hold
+      // stops). Read again every 30 s until it can be; nothing is written meanwhile.
       this.storeBroken = true;
-      this.warnOnce('store', 'The /data file is unreadable: it is left as it is');
-    } else if (loaded?.data) {
+      this.warnOnce('store', 'The /data file could not be read: read again every 30 s');
+      this.cancel(this.reloadTimer);
+      this.reloadTimer = this.later(TIMINGS.storeRetry, async () => {
+        this.applyLoad(await this.loadStore());
+      });
+      this.updateStatus().catch(() => {});
+      return;
+    }
+    this.storeBroken = false;
+    if (loaded?.data) {
       this.restore(loaded.data);
     }
     this.loaded = true;
     // What happened before the load (a stop clicked meanwhile) is written now.
     this.persist();
+    this.updateStatus().catch(() => {});
     for (const stop of this.stops.values()) {
       if (stop.fromBoot) {
         stop.fromBoot = false;
@@ -276,8 +308,11 @@ export class BeckerApp {
     if (paused !== undefined && paused > wall) {
       this.pauseUntil = mono + Math.min(paused - wall, TIMINGS.pauseMax);
     }
-    if (typeof data.address === 'string' && addressOf(data.address)) {
+    if (typeof data.address === 'string' && addressOf(data.address) && !this.lastAddressKey) {
       this.lastAddressKey = data.address;
+    }
+    if (data.confirm === true) {
+      this.confirmNeeded = true;
     }
     const list = Array.isArray(data.stops) ? data.stops.slice(0, LIMITS.pendingStops) : [];
     for (const entry of list) {
@@ -309,6 +344,7 @@ export class BeckerApp {
     return {
       v: 1,
       address: this.lastAddressKey || undefined,
+      confirm: this.confirmNeeded || undefined,
       lastReadAt: this.lastReadWall || undefined,
       pausedUntil:
         this.pauseLeft() > 0 ? Math.round(this.sessionWall() + this.pauseLeft()) : undefined,
@@ -407,6 +443,7 @@ export class BeckerApp {
     const sameBox = previous.key === this.config.key;
     // A new session: nothing is known of the box until it is listed again.
     this.groups.clear();
+    this.missingOnce.clear();
     this.remotes.clear();
     this.listed = false;
     this.remotesListed = false;
@@ -432,6 +469,11 @@ export class BeckerApp {
     this.running = true;
     const readSoon = this.config.key !== this.lastAddressKey;
     if (this.config.key !== this.lastAddressKey) {
+      // Another box may hold the same ids and types: the covers are confirmed
+      // by "Test the connection" before anything but a stop goes there.
+      if (this.lastAddressKey) {
+        this.confirmNeeded = true;
+      }
       this.lastAddressKey = this.config.key;
       this.persist();
     }
@@ -521,6 +563,7 @@ export class BeckerApp {
     const extra = [];
     if (this.stops.size > 0) extra.push(T.stopsPending(this.stops.size));
     if (this.storeBroken) extra.push(T.storeBroken);
+    if (this.confirmNeeded) extra.push(T.confirmNeeded);
     const join = (base, connected) => {
       const message = {
         en: [base.en, ...extra.map((e) => e.en)].join(' · '),
@@ -717,8 +760,12 @@ export class BeckerApp {
       if (!this.current(generation)) return;
       if (outcome.cut) {
         next = TIMINGS.readResume;
-      } else if (outcome.ok === 0 && outcome.failed > 0) {
-        throw outcome.error;
+      } else if (
+        (outcome.ok === 0 && outcome.failed > 0) ||
+        (outcome.coversOk === 0 && outcome.coversFailed > 0)
+      ) {
+        // Every read failing (or every cover, a sensor answering) is not "connected".
+        throw outcome.coverError ?? outcome.error;
       } else {
         this.failures = 0;
         this.lastError = undefined;
@@ -790,13 +837,32 @@ export class BeckerApp {
       this.warnOnce('remotes', `Sensor list not read: ${err?.message}`);
     }
     if (!this.current(generation)) return;
-    this.groups = new Map(groups.map((g) => [g.id, g]));
+    const next = new Map(groups.map((g) => [g.id, g]));
+    // The box may list only part of its items (reference README): a created
+    // cover missing from one list is kept until the next list, read at once.
+    let missing = false;
+    for (const device of this.createdDevices()) {
+      const parsed = parseExternalId(this.gladys, device.external_id);
+      if (parsed.kind !== 'group' || next.has(parsed.id)) {
+        this.missingOnce.delete(parsed.id);
+        continue;
+      }
+      const previous = this.groups.get(parsed.id);
+      if (previous && !this.missingOnce.has(parsed.id)) {
+        this.missingOnce.add(parsed.id);
+        next.set(parsed.id, previous);
+        missing = true;
+      } else {
+        this.missingOnce.delete(parsed.id);
+      }
+    }
+    this.groups = next;
     if (remotes) {
       this.remotes = new Map(remotes.map((r) => [r.id, r]));
       this.remotesListed = true;
     }
     this.listed = true;
-    this.listedAt = this.monotonic();
+    this.listedAt = missing ? -Infinity : this.monotonic();
     await this.publishDiscovery();
     this.checkIdentities();
   }
@@ -820,7 +886,7 @@ export class BeckerApp {
   }
 
   async readTargets(generation, signal) {
-    const outcome = { ok: 0, failed: 0, cut: false, error: undefined };
+    const outcome = { ok: 0, failed: 0, coversOk: 0, coversFailed: 0, cut: false };
     for (const device of this.createdDevices()) {
       if (!this.current(generation)) return outcome;
       if (signal.aborted) {
@@ -833,6 +899,10 @@ export class BeckerApp {
           const group = this.groups.get(parsed.id);
           if (!group?.feedback || this.otherType(parsed.id, device)) continue;
           await this.readGroup(parsed.id, this.config.address, signal);
+          outcome.coversOk += 1;
+          if (this.badges.get(device.external_id)?.transport === 'unreachable') {
+            this.badge(device.external_id, undefined);
+          }
         } else {
           const remote = this.remotes.get(parsed.id);
           const type = paramOf(device, PARAMS.TYPE);
@@ -851,6 +921,14 @@ export class BeckerApp {
         // One cover that fails never stops the others.
         outcome.failed += 1;
         outcome.error = err;
+        if (parsed.kind === 'group') {
+          outcome.coversFailed += 1;
+          outcome.coverError = err;
+          this.badge(device.external_id, T.badge.readFailed(err), {
+            degraded: true,
+            transport: 'unreachable',
+          });
+        }
         this.logger.warn(`Read of item ${parsed.id} failed: ${err?.message}`);
       }
     }
@@ -936,10 +1014,16 @@ export class BeckerApp {
       return;
     }
     const batch = states.slice(0, room);
+    // Reserved before the await: publications at the same time share the room.
+    const reserved = batch.map(() => mono);
+    this.publishedAt.push(...reserved);
     try {
       const result = await this.gladys.publishChangedStates(batch);
       const count = Number.isSafeInteger(result?.count) ? result.count : batch.length;
-      for (let i = 0; i < count; i += 1) this.publishedAt.push(mono);
+      for (let i = count; i < batch.length; i += 1) {
+        const at = this.publishedAt.indexOf(mono);
+        if (at !== -1) this.publishedAt.splice(at, 1);
+      }
     } catch (err) {
       this.logger.warn(`Publication failed: ${err?.message}`);
     }
@@ -971,6 +1055,12 @@ export class BeckerApp {
       if (!groups) {
         throw new BeckerError('format', 'not a list', { sent: true, answered: true });
       }
+      if (this.confirmNeeded) {
+        // The user saw this box answer at the new address: its covers are confirmed.
+        this.confirmNeeded = false;
+        this.persist();
+        this.updateStatus().catch(() => {});
+      }
       return T.test.ok({ covers: groups.length, sensors: this.remotes.size });
     } catch (err) {
       if (err?.kind === 'rate' || err?.kind === 'server') this.pauseFor(err);
@@ -980,7 +1070,7 @@ export class BeckerApp {
 
   // --- Commands ------------------------------------------------------------------------------
 
-  /** A command from Gladys. Resolves once sent and answered; rejects otherwise (within ~4.3 s). */
+  /** A command from Gladys. Resolves once sent and answered; rejects otherwise (within ~3.5 s). */
   async setValue(device, feature, value) {
     const parsed = parseExternalId(this.gladys, feature?.external_id);
     if (!parsed || parsed.key === undefined) {
@@ -1066,7 +1156,7 @@ export class BeckerApp {
     };
     this.stops.set(id, stop);
     const outcome = await this.runStop(stop, true);
-    if (outcome.answered) {
+    if (outcome.answered && !outcome.refused) {
       return { sent: true };
     }
     throw outcome.error ?? notSent('unknown');
@@ -1111,8 +1201,15 @@ export class BeckerApp {
         // Nothing to read back: an answered stop is all there is.
         this.finishStop(stop, T.badge.stopNoFeedback, false);
       } else {
+        stop.checkFails = 0;
         stop.timer = this.later(TIMINGS.stopCheck, () => this.checkStop(stop, token));
-        this.badge(deviceExt, T.badge.stopChecking(stop.tries), { degraded: true });
+        this.badge(
+          deviceExt,
+          outcome.refused
+            ? T.badge.stopRefused(stop.tries, outcome.error)
+            : T.badge.stopChecking(stop.tries),
+          { degraded: true },
+        );
         this.persist();
       }
     } else if (outcome.suspended) {
@@ -1147,15 +1244,35 @@ export class BeckerApp {
     if (stop.token !== token || this.stops.get(stop.id) !== stop) {
       return;
     }
+    // The read back is a read: it waits for the end of a pause the box asked.
+    const paused = this.pauseLeft();
+    if (paused > 0) {
+      stop.timer = this.later(paused, () => this.checkStop(stop, token));
+      return;
+    }
     const address = addressOf(stop.address);
     let read;
     try {
       read = await this.readGroup(stop.id, address, undefined);
     } catch (err) {
-      if (stop.token === token) {
-        this.logger.warn(`Stop check of cover ${stop.id} failed: ${err?.message}`);
-        stop.timer = this.later(TIMINGS.stopCheckRetry, () => this.checkStop(stop, token));
+      if (stop.token !== token || this.stops.get(stop.id) !== stop) {
+        return;
       }
+      this.logger.warn(`Stop check of cover ${stop.id} failed: ${err?.message}`);
+      if (err?.kind === 'rate' || err?.kind === 'server') {
+        this.pauseFor(err);
+      }
+      if (err?.kind === 'rpc') {
+        // The box refuses to give this state (group removed): nothing to check.
+        this.finishStop(stop, T.badge.stopNoFeedback, false);
+        return;
+      }
+      stop.checkFails = (stop.checkFails ?? 0) + 1;
+      const delay = Math.min(
+        TIMINGS.stopCheckRetryMax,
+        TIMINGS.stopCheckRetry * 2 ** (stop.checkFails - 1),
+      );
+      stop.timer = this.later(Math.max(delay, this.pauseLeft()), () => this.checkStop(stop, token));
       return;
     }
     if (stop.token !== token || this.stops.get(stop.id) !== stop || stop.sending) {
@@ -1198,6 +1315,13 @@ export class BeckerApp {
       throw this.refuse(deviceExt, 'close', '', T.why.otherType);
     }
     const type = this.groups.get(id)?.type ?? paramOf(device, PARAMS.TYPE);
+    if (!type) {
+      // Without its type, the direction of "close" is unknown (an awning closes up).
+      throw this.refuse(deviceExt, 'close', '', T.why.noType);
+    }
+    if (this.confirmNeeded) {
+      throw this.refuse(deviceExt, 'close', '', T.why.confirm);
+    }
     const seq = ++this.seq;
     this.barrierFor(id, seq);
     this.cutCycleRead();
@@ -1254,7 +1378,8 @@ export class BeckerApp {
             value: kind === 'stop' ? 0 : moveOf(target.type, 'close'),
           },
           {
-            timeout: Math.min(TIMINGS.protectiveAttempt, left),
+            // Never cut before the end of the budget: a slow answer is an answer.
+            timeout: left,
             beforeSend: () => {
               if (this.closed || !alive()) throw notSent('stopped');
               if (kind === 'stop' && target.suspendedBy) throw notSent('stopped');
@@ -1281,8 +1406,12 @@ export class BeckerApp {
             this.kickStop(suspends);
           }
         }
-        if (err.kind === 'rpc') {
-          // The box answered and refused: an answered try.
+        if (err.kind === 'rate' || err.kind === 'server') {
+          // Not an answer to the command: the others pause, this one tries again.
+          this.pauseFor(err);
+        } else if (err.answered) {
+          // The box answered (a refusal, a 404, a page that is not JSON-RPC):
+          // an answered try; the read back decides.
           return { answered: true, refused: true, sent: true, error: err, sendSeq };
         }
         if (err.kind === 'notSent' && err.why === 'stopped') {
@@ -1310,6 +1439,9 @@ export class BeckerApp {
     const left = this.pauseLeft();
     if (left > 0) {
       throw this.refuse(deviceExt, command, value ?? '', T.why.paused(left));
+    }
+    if (this.confirmNeeded) {
+      throw this.refuse(deviceExt, command, value ?? '', T.why.confirm);
     }
     const group = this.groups.get(id);
     if (!this.listed || !group) {
@@ -1355,7 +1487,7 @@ export class BeckerApp {
   }
 
   async acquireSlot(deadline) {
-    if (this.active < LIMITS.parallelCommands) {
+    if (this.active < this.parallel) {
       this.active += 1;
       return true;
     }
@@ -1431,6 +1563,12 @@ export class BeckerApp {
       }
       if (err.kind === 'rate' || err.kind === 'server') {
         this.pauseFor(err);
+      }
+      if (err.kind === 'timeout' && err.sent && this.active > 1 && this.parallel > 1) {
+        // A box that may serve one request at a time (unknown, see TODO.md):
+        // its covers are commanded one after the other for the rest of the run.
+        this.parallel = 1;
+        this.logger.warn('A command got no answer while others were in flight: one at a time now');
       }
       if (err.kind === 'rpc') {
         return { answered: true, refused: true, sent: true, error: err, sendSeq };

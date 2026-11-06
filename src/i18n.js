@@ -172,8 +172,12 @@ export const T = {
     fr: `${n} arrêt(s) en attente d’envoi ou de confirmation`,
   }),
   storeBroken: {
-    en: '/data unreadable: stops are not kept across a restart',
-    fr: '/data illisible : les arrêts ne sont pas gardés au redémarrage',
+    en: '/data not read yet (read again every 30 s): stops are not kept across a restart meanwhile',
+    fr: '/data pas encore lu (relu toutes les 30 s) : les arrêts ne sont pas gardés au redémarrage d’ici là',
+  },
+  confirmNeeded: {
+    en: 'New address: press Test the connection to confirm the box (only the stop goes until then)',
+    fr: 'Nouvelle adresse : appuyez sur Tester la connexion pour confirmer la box (seul l’arrêt part d’ici là)',
   },
   test: {
     ok: ({ covers, sensors }) => ({
@@ -255,6 +259,17 @@ export const T = {
       en: `Stop: accepted by the box, waiting for the read back (${tries}/3 answered tries)`,
       fr: `Arrêt : accepté par la box, en attente de relecture (${tries}/3 essais répondus)`,
     }),
+    stopRefused: (tries, err) => {
+      const r = reasonOf(err);
+      return {
+        en: `Stop: answered by the box but not accepted (${r.en}), read back in progress (${tries}/3 answered tries)`,
+        fr: `Arrêt : la box a répondu sans l’accepter (${r.fr}), relecture en cours (${tries}/3 essais répondus)`,
+      };
+    },
+    readFailed: (err) => {
+      const r = reasonOf(err);
+      return { en: `Not read: ${r.en}`, fr: `Non lu : ${r.fr}` };
+    },
     stopApplied: {
       en: 'Stop: applied (read back, not moving)',
       fr: 'Arrêt : appliqué (relu, à l’arrêt)',
@@ -299,6 +314,14 @@ export const T = {
       fr: `la box a demandé de ralentir, encore ${age(ms)}`,
     }),
     value: { en: 'invalid value', fr: 'valeur invalide' },
+    noType: {
+      en: 'type of cover unknown until the box lists it',
+      fr: 'type de volet inconnu tant que la box ne l’a pas listé',
+    },
+    confirm: {
+      en: 'new address of the box: press Test the connection to confirm it',
+      fr: 'nouvelle adresse de box : appuyez sur Tester la connexion pour la confirmer',
+    },
     noPosition: { en: 'this motor gives no position', fr: 'ce moteur ne donne pas de position' },
     queueFull: { en: 'too many commands waiting', fr: 'trop de commandes en attente' },
     unknownDevice: { en: 'unknown device', fr: 'appareil inconnu' },

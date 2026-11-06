@@ -12,6 +12,10 @@ to date at the end of every milestone.
       it applied, close on the same path, order rules (barrier, read sequence),
       pause on 429/5xx kept across restarts, badges, en/fr, docs, cover.
       Tested against a simulated box on 127.0.0.1 only.
+- [x] **Review r1 fixes** (2026-11-05): id echo optional, any answer counts
+      as a try, read back under pause, /data read again, the guards a mutant
+      showed without a test (mutant list versioned in
+      `scripts/mutants.list.mjs`, run by `scripts/mutants.mjs`).
 - [ ] **Milestone 2 — real box**: run against a real CC31/CC41/CC51 (see "To
       check"); turn the answers (anonymized) into fixtures.
 - [ ] **Milestone 3 — more**: doors and windows (behind an option, never a
@@ -26,11 +30,11 @@ to date at the end of every milestone.
   `error`) and the `error` codes of a refused command (wind or rain alarm).
 - Whether `group_get_state` always gives `moving_up` / `moving_down` (without
   them a stop is not checked by a read: one answered stop is all there is).
-- Whether the box echoes the JSON-RPC `id` (required here; the reference always
-  sends 0 and never checks it).
+- Whether the box echoes the JSON-RPC `id` (checked when echoed; absent, null
+  or 0 accepted: one connection per request).
 - Whether the box serves several requests at once (several covers of a scene
-  are commanded in parallel, as Home Assistant does; the reads go one at a
-  time).
+  are commanded in parallel, as Home Assistant does, up to 8; one command left
+  without answer while others are in flight switches to one at a time).
 - The ids of groups and remotes: same numbering space or not (kept apart here).
 - Whether the API gives a serial number or a MAC of the box (none known: see
   "Identity" below).

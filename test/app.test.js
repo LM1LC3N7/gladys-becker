@@ -322,7 +322,30 @@ test('a cover the box lists no longer, or with another type, is shown on its bad
     .map((g) => (g.id === 1 ? { ...g, device_type: 'awning' } : g));
   await s.clock.advance(11 * MINUTE);
   assert.match(s.badge(1).message.en, /another type/);
+  // One list without it may be partial (reference README): kept, listed again at the next read.
+  assert.notEqual(s.badge(2)?.transport, 'unreachable');
+  assert.ok(s.app.groups.has(2));
+  const lists = s.box.log.filter((r) => r.method === 'deviced.deviced_get_item_list').length;
+  await s.clock.advance(MINUTE);
+  assert.ok(
+    s.box.log.filter((r) => r.method === 'deviced.deviced_get_item_list').length > lists,
+    'listed again at the next read, not 10 min later',
+  );
   assert.equal(s.badge(2).transport, 'unreachable');
+  assert.equal(s.app.groups.has(2), false);
+});
+
+test('a cover back in the next list after a partial one is never marked gone', async (t) => {
+  const s = await setup();
+  t.after(() => s.stop());
+  const all = s.box.groups;
+  s.box.groups = all.filter((g) => g.id !== 2);
+  await s.clock.advance(11 * MINUTE);
+  s.box.groups = all;
+  await s.clock.advance(MINUTE);
+  assert.notEqual(s.badge(2)?.transport, 'unreachable');
+  const open = await s.click(2, 'state', 1);
+  assert.equal(open.ack.success, true);
 });
 
 test('stop() leaves no timer and no request behind', async (t) => {

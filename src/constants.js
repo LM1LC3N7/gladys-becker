@@ -126,9 +126,7 @@ export const LIMITS = {
 };
 
 export const TIMINGS = {
-  /** One send of a stop or a close waits this long for its answer. */
-  protectiveAttempt: 1200,
-  /** A stop or close that got no answer is written again this often within its budget. */
+  /** A stop or close whose connection failed is written again this often within its budget. */
   protectiveRetry: 250,
   /** Gladys acks a set_value within 5 s: a stop or close answers within this. */
   protectiveBudget: 3300,
@@ -140,8 +138,9 @@ export const TIMINGS = {
   stopRetries: [5 * SECOND, 10 * SECOND, 20 * SECOND, 30 * SECOND, MINUTE],
   /** An answered stop is checked by a read started this long after its answer. */
   stopCheck: 2 * SECOND,
-  /** A check that could not read is tried again after this. */
+  /** A check that could not read is tried again after this, doubled up to the max. */
   stopCheckRetry: 5 * SECOND,
+  stopCheckRetryMax: MINUTE,
   /** Answered sends of a stop before it is given up when the reads still show a move. */
   stopTries: 3,
   /**
@@ -149,8 +148,8 @@ export const TIMINGS = {
    * arrival is refused, never sent late; its answer is awaited until
    * `commandAnswerBy`.
    */
-  commandSendBy: 3500,
-  commandAnswerBy: 4300,
+  commandSendBy: 2500,
+  commandAnswerBy: 3500,
   /** An answered command is checked by reads at these delays after its answer. */
   commandChecks: [5 * SECOND, 20 * SECOND],
   /** One read request (a list or a state). */
@@ -173,4 +172,6 @@ export const TIMINGS = {
   testGap: 10 * SECOND,
   /** A read or write of /data never takes longer than this. */
   storeTimeout: 2 * SECOND,
+  /** /data that could not be read is read again this often (never written meanwhile). */
+  storeRetry: 30 * SECOND,
 };

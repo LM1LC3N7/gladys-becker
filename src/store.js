@@ -86,13 +86,14 @@ export function fileStore({
   timeout = TIMINGS.storeTimeout,
   timers = globalThis,
   read = readSmallFile,
+  write = writeSmallFile,
 } = {}) {
   let running = null;
   let waiting = null;
   const run = () => {
     const job = waiting;
     waiting = null;
-    running = writeSmallFile(path, job.text).then(
+    running = write(path, job.text).then(
       () => job.resolve(),
       (err) => job.reject(err),
     );
@@ -123,15 +124,21 @@ export function fileStore({
   };
 }
 
-/** For the tests: the same JSON round trip as the file; `hang` freezes the writes, `fail` breaks them. */
-export function memoryStore(initial = null, { broken = false } = {}) {
+/** For the tests: the same JSON round trip as the file; `hang` freezes the writes, `fail` breaks them, `broken` the reads. */
+export function memoryStore(initial = null, { broken = false, loading } = {}) {
   return {
     data: initial === null ? null : JSON.parse(JSON.stringify(initial)),
     saves: 0,
     hang: false,
     fail: false,
+    broken,
+    loads: 0,
+    /** `loading`: a promise the load waits for (a slow disk). */
+    loading,
     async load() {
-      if (broken) return { broken: true };
+      this.loads += 1;
+      if (this.loading) await this.loading;
+      if (this.broken) return { broken: true };
       return this.data === null
         ? { missing: true }
         : { data: JSON.parse(JSON.stringify(this.data)) };

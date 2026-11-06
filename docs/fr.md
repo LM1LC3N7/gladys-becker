@@ -52,8 +52,10 @@ L'**arrêt** n'est jamais bloqué : ni par une lecture en cours (il la coupe), n
 par une pause demandée par la box, ni par une autre commande en attente, ni par
 la liste de la box pas encore lue, ni par une configuration illisible (il part
 vers la dernière adresse connue), ni par un `/data` lent ou illisible. Il part
-aussitôt ; pendant 3,3 s il est réécrit toutes les 250 ms jusqu'à ce que la box
-réponde.
+aussitôt et attend la réponse jusqu'à 3,3 s (une réponse lente est une
+réponse) ; si la connexion elle-même échoue, il est réécrit toutes les 250 ms
+pendant ces 3,3 s. **Toute réponse de la box compte** (acceptation, refus, page
+d'erreur) ; un 429 ou un 5xx, un délai dépassé ou une coupure ne comptent pas.
 
 L'arrêt est gardé (en mémoire, et dans `/data` sans l'attendre) jusqu'à ce
 qu'une lecture du volet, partie après la réponse de la box, montre qu'il ne
@@ -61,8 +63,12 @@ bouge plus :
 
 - un arrêt auquel la box n'a pas répondu est renvoyé après 5 s, 10 s, 20 s,
   30 s, puis chaque minute et à chaque lecture réussie, **sans fin et sans
-  limite d'âge** : seul un envoi qui a reçu une réponse compte comme essai (un
-  délai dépassé, une coupure, un 429 ou un 5xx ne comptent pas) ;
+  limite d'âge** : seul un envoi qui a reçu une réponse compte comme essai ;
+- un arrêt auquel la box a répondu sans l'accepter (refus, page d'erreur) est
+  acquitté en échec, et la relecture décide comme pour un arrêt accepté ;
+- la relecture attend la fin d'une pause demandée par la box (429, 5xx) ; sans
+  réponse, elle est retentée après 5 s, 10 s, 20 s… jusqu'à chaque minute ; si
+  la box refuse de donner cet état (groupe supprimé), l'arrêt prend fin ;
 - répondu mais le volet bouge encore dans le même sens : renvoyé, **3 essais
   répondus au plus**, puis « toujours en mouvement » sur le badge ;
 - le volet bouge **dans l'autre sens** : un mouvement lancé ailleurs
@@ -84,10 +90,11 @@ après lui.
 ## La fermeture
 
 **Fermer** suit le même chemin (devant tout, coupe les lectures, ni retenue par
-une pause ni par la liste pas encore lue, réécrite toutes les 250 ms pendant
-3,3 s), mais elle n'est jamais renvoyée après un redémarrage. Elle n'est refusée
-que si la box liste désormais ce volet avec **un autre type** (le sens pourrait
-être inversé : un store banne se ferme vers le haut, un volet vers le bas).
+une pause ni par la liste pas encore lue, budget de 3,3 s), mais elle n'est
+jamais renvoyée après un redémarrage. Elle n'est refusée que si son sens n'est
+pas sûr : la box liste désormais ce volet avec **un autre type**, ou son type
+est inconnu (un store banne se ferme vers le haut, un volet vers le bas), ou
+l'adresse de la box a changé sans être encore confirmée (voir plus bas).
 
 ## Ouvrir et position
 
@@ -95,13 +102,24 @@ Ils sont refusés, avec la raison sur le badge de l'appareil, quand : la
 configuration n'est pas valide ; la box a demandé de ralentir (429, 5xx ; la
 pause est gardée au redémarrage, de 1 min à 6 h) ; le volet n'a pas été listé
 par la box depuis le démarrage (ou depuis qu'elle ne répondait plus) ; la box
-liste cet identifiant avec un autre type ; le moteur ne donne pas de position
-(position seulement) ; la valeur n'est pas un nombre entier de 0 à 100 ;
-32 commandes attendent déjà ; la commande ne peut pas partir dans les 3,5 s ;
-ou un arrêt ou une fermeture de ce volet est arrivé après elle.
+liste cet identifiant avec un autre type ; l'adresse de la box a changé sans
+être encore confirmée ; le moteur ne donne pas de position (position
+seulement) ; la valeur n'est pas un nombre entier de 0 à 100 ; 32 commandes
+attendent déjà ; la commande ne peut pas partir dans les 2,5 s (sa réponse est
+attendue jusqu'à 3,5 s) ; ou un arrêt ou une fermeture de ce volet est arrivé
+après elle.
 
-Plusieurs volets bougent en même temps (une scène de cinq volets les règle tous
-les cinq). Une commande n'est dite **appliquée** que si une lecture après elle
+**Nouvelle adresse de box** : une autre box peut avoir des volets aux mêmes
+identifiants et types. Après un changement d'adresse, seul l'arrêt part jusqu'à
+ce que vous appuyiez sur **Tester la connexion** et que la box réponde (gardé
+au redémarrage).
+
+Plusieurs volets bougent en même temps (8 au plus ; une scène de cinq volets
+les règle tous les cinq). Si une commande reste sans réponse pendant que
+d'autres sont en vol, la box ne sert peut-être qu'une requête à la fois : les
+volets sont alors commandés l'un après l'autre jusqu'au redémarrage de
+l'intégration. Sur une telle box, un arrêt peut aussi attendre derrière une
+commande que la box est en train de servir. Une commande n'est dite **appliquée** que si une lecture après elle
 montre la position demandée (5 s et 20 s après) ; sinon le badge dit « acceptée,
 en attente de relecture », « pas encore appliquée », « envoyée, sans
 confirmation » (pas de réponse) ou « rien envoyé ».
@@ -109,7 +127,11 @@ confirmation » (pas de réponse) ou « rien envoyé ».
 ## Lectures
 
 Les positions et les capteurs sont lus à l'intervalle choisi, une requête à la
-fois ; les listes de la box toutes les 10 minutes. Une lecture partie avant une
+fois ; les listes de la box toutes les 10 minutes. Un volet absent d'une liste
+(la box peut n'en lister qu'une partie) est gardé jusqu'à la liste suivante,
+relue à la lecture suivante ; absent deux fois, il est affiché « n'est plus
+listé ». Quand toutes les lectures de volets échouent, l'intégration n'est pas
+affichée connectée et chaque volet dit « Non lu ». Une lecture partie avant une
 commande d'un volet ne s'applique jamais après elle, et les lectures
 s'appliquent dans l'ordre de leur départ. Un volet ou la liste des capteurs en
 échec n'arrête jamais les autres. Un redémarrage (même box) ne lit jamais plus tôt que
@@ -123,7 +145,8 @@ l'intervalle.
 - **« un autre type de volet »** : l'identifiant de cet appareil désigne
   maintenant un autre volet dans la box (reconfigurée). Supprimez l'appareil et
   ajoutez-le de nouveau depuis la Découverte.
-- **« /data illisible »** : le fichier `/data/becker-state.json` ne peut pas
-  être lu ; il est laissé tel quel et les arrêts ne sont pas gardés au
-  redémarrage.
+- **« /data pas encore lu »** : le fichier `/data/becker-state.json` n'a pas
+  pu être lu (ou a pris plus de 2 s) ; il est laissé tel quel, relu toutes les
+  30 s, et les arrêts qu'il garde partent dès qu'il est lu. Rien n'y est écrit
+  d'ici là : les arrêts ne sont donc pas gardés au redémarrage jusque-là.
 - Les journaux ne contiennent jamais une adresse saisie par erreur.

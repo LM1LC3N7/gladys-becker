@@ -223,7 +223,11 @@ export function parseAnswer({ status, headers = {}, body }, id) {
   if (!json || typeof json !== 'object' || Array.isArray(json)) {
     throw new BeckerError('format', 'not an answer of a CentralControl', answered);
   }
-  if (json.id !== id) {
+  // Each request has its own connection: its answer is its own. The id is
+  // checked when the box echoes one (the reference always sends 0 and never
+  // reads it back): absent, null or 0 is taken as "not echoed"; another
+  // number is the answer to another request.
+  if (json.id !== id && json.id !== undefined && json.id !== null && json.id !== 0) {
     throw new BeckerError('format', 'answer to another request', answered);
   }
   if (Object.hasOwn(json, 'error') && json.error !== null) {
