@@ -10,6 +10,8 @@ the notes of the version's GitHub Release.
 
 ## [Unreleased]
 
+## [0.1.1] - 2026-11-06
+
 ### Added
 
 - Becker covers (shutter, venetian, screen, awning, sun sail, blinds, fold-out
@@ -46,3 +48,6 @@ the notes of the version's GitHub Release.
 - An id echoed as a text equal to ours is accepted; an address change is seen
   even when /data is read late; a cover the box refuses to read (removed) does
   not make the box unreachable nor slow the other reads.
+
+[Unreleased]: https://github.com/LM1LC3N7/gladys-becker/compare/v0.1.1...HEAD
+[0.1.1]: https://github.com/LM1LC3N7/gladys-becker/releases/tag/v0.1.1

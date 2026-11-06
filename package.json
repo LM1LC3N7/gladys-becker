@@ -1,6 +1,6 @@
 {
   "name": "gladys-becker",
-  "version": "0.1.0",
+  "version": "0.1.1",
   "private": true,
   "description": "Gladys Assistant external integration for Becker shutters, blinds, awnings and weather sensors through the CentralControl CC31/CC41/CC51, on the local network. Unofficial, not affiliated with Becker-Antriebe.",
   "type": "module",

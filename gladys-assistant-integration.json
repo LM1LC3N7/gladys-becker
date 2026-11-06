@@ -6,8 +6,8 @@
     "en": "Becker shutters, awnings and weather sensors via the CentralControl, locally. Unofficial.",
     "fr": "Volets, stores et capteurs météo Becker par la CentralControl, en local. Non officiel."
   },
-  "version": "0.1.0",
-  "docker_image": "ghcr.io/lm1lc3n7/gladys-becker:0.1.0",
+  "version": "0.1.1",
+  "docker_image": "ghcr.io/lm1lc3n7/gladys-becker:0.1.1",
   "gladys_version": ">=5.1.0",
   "cover_image": "https://raw.githubusercontent.com/LM1LC3N7/gladys-becker/main/cover.png",
   "categories": ["lighting", "environment"],
